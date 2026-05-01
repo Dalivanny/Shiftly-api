@@ -1,3 +1,4 @@
-fastapi==0.110.0
-uvicorn==0.29.0
-ortools==9.9.3963
+fastapi
+uvicorn
+ortools
+pydantic
