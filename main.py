@@ -1,16 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from ortools.sat.python import cp_model
-from fastapi.responses import StreamingResponse
 import io
 import datetime
 
-
 app = FastAPI()
 
-# Allow your Next.js app to call this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,6 +26,16 @@ class ScheduleRequest(BaseModel):
     opening_requirements: Dict[str, Any]
     availability: List[List[List[int]]]
     rules: List[Dict[str, str]]
+
+class PDFRequest(BaseModel):
+    schedule: Dict[str, Dict[str, str]]
+    staff: List[Dict[str, str]]
+    days: List[str]
+    shift_times: List[str]
+    closed_days: List[str]
+    shift_counts: Dict[str, int]
+    rules: List[Dict[str, str]]
+    week_start: Optional[str] = None
 
 @app.get("/")
 def root():
@@ -49,7 +57,6 @@ def generate_schedule(data: ScheduleRequest):
 
     model = cp_model.CpModel()
 
-    # Create shift variables
     shift_assigned = {}
     for e in range(num_employees):
         for d in range(num_days):
@@ -141,7 +148,6 @@ def generate_schedule(data: ScheduleRequest):
         model.add_min_equality(min_shifts, total_shifts_per)
         model.maximize(min_shifts)
 
-    # Solve
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 30.0
     status = solver.solve(model)
@@ -149,7 +155,6 @@ def generate_schedule(data: ScheduleRequest):
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return {"error": "No valid schedule found. Check availability and staffing rules."}
 
-    # Build result
     result = {}
     shift_counts = {}
     for e in range(num_employees):
@@ -171,15 +176,13 @@ def generate_schedule(data: ScheduleRequest):
                 available = any(availability[e][d][s] == 1 for s in range(num_shifts))
                 result[name][day] = "OFF" if available else "N/A"
 
-    class PDFRequest(BaseModel):
-    schedule: Dict[str, Dict[str, str]]
-    staff: List[Dict[str, str]]
-    days: List[str]
-    shift_times: List[str]
-    closed_days: List[str]
-    shift_counts: Dict[str, int]
-    rules: List[Dict[str, str]]
-    week_start: Optional[str] = None
+    return {
+        "success": True,
+        "schedule": result,
+        "shift_counts": shift_counts,
+        "employees": employees,
+        "levels": levels,
+    }
 
 @app.post("/generate-pdf")
 def generate_pdf(req: PDFRequest):
@@ -190,36 +193,37 @@ def generate_pdf(req: PDFRequest):
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
-    # Palette
-    BG_DARK     = colors.HexColor('#0f0e0c')
-    AMBER       = colors.HexColor('#e8a830')
-    AMBER_LIGHT = colors.HexColor('#faeeda')
-    TEAL        = colors.HexColor('#1D9E75')
-    TEAL_LIGHT  = colors.HexColor('#E1F5EE')
-    PURPLE_LIGHT= colors.HexColor('#EEEDFE')
-    PURPLE      = colors.HexColor('#534AB7')
-    CORAL_LIGHT = colors.HexColor('#FAECE7')
-    CORAL       = colors.HexColor('#993C1D')
-    ROW_ALT     = colors.HexColor('#f7f5f0')
-    ROW_WHITE   = colors.white
-    BORDER      = colors.HexColor('#e0dcd4')
-    TEXT_DARK   = colors.HexColor('#1a1916')
-    TEXT_MID    = colors.HexColor('#5a5854')
-    TEXT_LIGHT  = colors.HexColor('#9a9894')
-    RED_LIGHT   = colors.HexColor('#FCEBEB')
-    RED         = colors.HexColor('#A32D2D')
+    BG_DARK      = colors.HexColor('#0f0e0c')
+    AMBER        = colors.HexColor('#e8a830')
+    AMBER_LIGHT  = colors.HexColor('#faeeda')
+    TEAL         = colors.HexColor('#1D9E75')
+    TEAL_LIGHT   = colors.HexColor('#E1F5EE')
+    PURPLE_LIGHT = colors.HexColor('#EEEDFE')
+    PURPLE       = colors.HexColor('#534AB7')
+    CORAL_LIGHT  = colors.HexColor('#FAECE7')
+    CORAL        = colors.HexColor('#993C1D')
+    ROW_ALT      = colors.HexColor('#f7f5f0')
+    ROW_WHITE    = colors.white
+    BORDER       = colors.HexColor('#e0dcd4')
+    TEXT_DARK    = colors.HexColor('#1a1916')
+    TEXT_MID     = colors.HexColor('#5a5854')
+    TEXT_LIGHT   = colors.HexColor('#9a9894')
+    RED_LIGHT    = colors.HexColor('#FCEBEB')
+    RED          = colors.HexColor('#A32D2D')
 
     def level_color(level):
         return {
-            'Senior':   (AMBER_LIGHT, AMBER),
-            'Junior':   (TEAL_LIGHT, TEAL),
-            'New Staff':(PURPLE_LIGHT, PURPLE),
-            'Trainee':  (CORAL_LIGHT, CORAL),
+            'Senior':    (AMBER_LIGHT, AMBER),
+            'Junior':    (TEAL_LIGHT, TEAL),
+            'New Staff': (PURPLE_LIGHT, PURPLE),
+            'Trainee':   (CORAL_LIGHT, CORAL),
         }.get(level, (ROW_WHITE, TEXT_MID))
 
     def shift_color(val, shift_times):
-        if val == shift_times[0]: return (AMBER_LIGHT, AMBER)
-        if len(shift_times) > 1 and val == shift_times[1]: return (TEAL_LIGHT, TEAL)
+        if val == shift_times[0]:
+            return (AMBER_LIGHT, AMBER)
+        if len(shift_times) > 1 and val == shift_times[1]:
+            return (TEAL_LIGHT, TEAL)
         return None
 
     buffer = io.BytesIO()
@@ -229,16 +233,17 @@ def generate_pdf(req: PDFRequest):
         leftMargin=14*mm, rightMargin=14*mm,
         topMargin=14*mm, bottomMargin=14*mm,
     )
-
     story = []
 
-    # Header table
+    # Header
     week_str = req.week_start or datetime.date.today().strftime('%d %b %Y')
     header_data = [[
         Paragraph('<b>Shiftly</b>', ParagraphStyle('logo', fontName='Helvetica-Bold', fontSize=18, textColor=AMBER)),
         Paragraph('Weekly Schedule', ParagraphStyle('rest', fontName='Helvetica-Bold', fontSize=13, textColor=TEXT_DARK)),
-        Paragraph(f'Week of {week_str}<br/><font size=8 color=grey>Generated {datetime.date.today().strftime("%d %b %Y")}</font>',
-            ParagraphStyle('wk', fontName='Helvetica', fontSize=10, textColor=TEXT_MID, alignment=TA_RIGHT)),
+        Paragraph(
+            f'Week of {week_str}<br/><font size=8 color=grey>Generated {datetime.date.today().strftime("%d %b %Y")}</font>',
+            ParagraphStyle('wk', fontName='Helvetica', fontSize=10, textColor=TEXT_MID, alignment=TA_RIGHT)
+        ),
     ]]
     header_tbl = Table(header_data, colWidths=[30*mm, 180*mm, 59*mm])
     header_tbl.setStyle(TableStyle([
@@ -269,14 +274,12 @@ def generate_pdf(req: PDFRequest):
     story.append(Spacer(1, 4))
 
     # Schedule table
-    col_w = 19*mm
+    col_w  = 19*mm
     name_w = 28*mm
     level_w = 24*mm
 
-    header1 = ['', ''] + [d[:3] for d in req.days]
-    header2 = ['Name', 'Level'] + ['' for _ in req.days] + ['Total']
     header1 = ['', ''] + [d[:3] for d in req.days] + ['']
-
+    header2 = ['Name', 'Level'] + ['' for _ in req.days] + ['Total']
     sched_data = [header1, header2]
     row_styles = []
     r = 2
@@ -284,7 +287,8 @@ def generate_pdf(req: PDFRequest):
     level_order = ['Senior', 'Junior', 'New Staff', 'Trainee']
     for level in level_order:
         group = [s for s in req.staff if s.get('level') == level]
-        if not group: continue
+        if not group:
+            continue
 
         divider = [level.upper()] + [''] * (len(req.days) + 2)
         sched_data.append(divider)
@@ -303,7 +307,7 @@ def generate_pdf(req: PDFRequest):
             name = s.get('name', '')
             count = req.shift_counts.get(name, 0)
             row = [name, level]
-            for di, day in enumerate(req.days):
+            for day in req.days:
                 val = req.schedule.get(name, {}).get(day, 'N/A')
                 row.append(val)
             row.append(str(count))
@@ -326,13 +330,20 @@ def generate_pdf(req: PDFRequest):
                 if day in req.closed_days:
                     row_styles.append(('TEXTCOLOR', (col, r), (col, r), TEXT_LIGHT))
                 elif val == 'N/A':
-                    row_styles += [('BACKGROUND', (col, r), (col, r), RED_LIGHT), ('TEXTCOLOR', (col, r), (col, r), RED)]
+                    row_styles += [
+                        ('BACKGROUND', (col, r), (col, r), RED_LIGHT),
+                        ('TEXTCOLOR', (col, r), (col, r), RED),
+                    ]
                 elif val == 'OFF':
                     row_styles.append(('TEXTCOLOR', (col, r), (col, r), TEXT_LIGHT))
                 else:
                     sc = shift_color(val, req.shift_times)
                     if sc:
-                        row_styles += [('BACKGROUND', (col, r), (col, r), sc[0]), ('TEXTCOLOR', (col, r), (col, r), sc[1]), ('FONTNAME', (col, r), (col, r), 'Helvetica-Bold')]
+                        row_styles += [
+                            ('BACKGROUND', (col, r), (col, r), sc[0]),
+                            ('TEXTCOLOR', (col, r), (col, r), sc[1]),
+                            ('FONTNAME', (col, r), (col, r), 'Helvetica-Bold'),
+                        ]
             r += 1
 
     col_widths = [name_w, level_w] + [col_w] * len(req.days) + [14*mm]
@@ -364,8 +375,7 @@ def generate_pdf(req: PDFRequest):
     story.append(sched_table)
     story.append(Spacer(1, 14))
 
-    # Fairness table
-    story.append(Paragraph('FAIRNESS SUMMARY', ParagraphStyle('sec', fontName='Helvetica-Bold', fontSize=9, textColor=TEXT_LIGHT, spaceBefore=4, spaceAfter=6)))
+    # Bottom section: fairness + rules
     max_shifts = max(req.shift_counts.values()) if req.shift_counts else 1
     fair_data = [['Employee', 'Level', 'Shifts', 'Distribution']]
     fair_styles = []
@@ -400,13 +410,14 @@ def generate_pdf(req: PDFRequest):
         ('RIGHTPADDING', (0,0), (-1,-1), 8),
     ] + fair_styles)
 
-    fair_table = Table(fair_data, colWidths=[40*mm, 32*mm, 20*mm, 60*mm], style=fair_style)
+    fair_table = Table(fair_data, colWidths=[40*mm, 32*mm, 20*mm, 55*mm], style=fair_style)
 
-    # Rules table
-    story.append(Paragraph('SUPERVISION RULES', ParagraphStyle('sec2', fontName='Helvetica-Bold', fontSize=9, textColor=TEXT_LIGHT, spaceBefore=14, spaceAfter=6)))
     rules_data = [['#', 'Rule']]
     for i, rule in enumerate(req.rules):
-        rules_data.append([str(i+1), f"When a {rule.get('level2','')} is scheduled, at least one {rule.get('level1','')} must also work that day."])
+        rules_data.append([
+            str(i+1),
+            f"When a {rule.get('level2','')} is scheduled, at least one {rule.get('level1','')} must also work that day."
+        ])
 
     rules_style = TableStyle([
         ('BACKGROUND', (0,0), (-1,0), BG_DARK),
@@ -428,11 +439,12 @@ def generate_pdf(req: PDFRequest):
     rules_table = Table(rules_data, colWidths=[12*mm, 140*mm], style=rules_style)
 
     bottom_data = [[fair_table, rules_table]]
-    bottom_tbl = Table(bottom_data, colWidths=[160*mm, 109*mm])
+    bottom_tbl = Table(bottom_data, colWidths=[155*mm, 114*mm])
     bottom_tbl.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('LEFTPADDING', (1,0), (1,0), 14),
     ]))
+    story.append(Paragraph('FAIRNESS SUMMARY', ParagraphStyle('sec', fontName='Helvetica-Bold', fontSize=9, textColor=TEXT_LIGHT, spaceBefore=4, spaceAfter=6)))
     story.append(bottom_tbl)
 
     story.append(Spacer(1, 10))
@@ -447,13 +459,5 @@ def generate_pdf(req: PDFRequest):
     return StreamingResponse(
         buffer,
         media_type='application/pdf',
-        headers={'Content-Disposition': f'attachment; filename="shiftly-schedule.pdf"'}
+        headers={'Content-Disposition': 'attachment; filename="shiftly-schedule.pdf"'}
     )
-
-    return {
-        "success": True,
-        "schedule": result,
-        "shift_counts": shift_counts,
-        "employees": employees,
-        "levels": levels,
-    }
