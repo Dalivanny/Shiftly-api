@@ -285,19 +285,21 @@ def generate_pdf(req: PDFRequest):
 
         # Generate dates for each day column
 
-        dates = []
-        for di in range(len(req.days)):
-            dates.append(get_date_for_day(req.week_start or '', di) if req.week_start else '')
+        # Build day headers with dates underneath
+        def day_header(day, di):
+            date_str = get_date_for_day(req.week_start, di) if req.week_start else ''
+            if date_str:
+                return f"{day[:3]}\n{date_str}"
+            return day[:3]
 
         if show_level:
-            header1 = ['', ''] + [f"{d[:3]}" for d in req.days] + ['']
-            header2 = ['Name', 'Level'] + [dates[di] if dates[di] else '' for di in range(len(req.days))] + ['Total']
+            header1 = ['', ''] + [day_header(d, di) for di, d in enumerate(req.days)] + ['']
+            header2 = ['Name', 'Level'] + ['' for _ in req.days] + ['Total']
             col_widths = [name_w, level_w] + [col_w] * len(req.days) + [14*mm]
         else:
-            header1 = [''] + [f"{d[:3]}" for d in req.days] + ['']
-            header2 = ['Name'] + [dates[di] if dates[di] else '' for di in range(len(req.days))] + ['Total']
+            header1 = [''] + [day_header(d, di) for di, d in enumerate(req.days)] + ['']
+            header2 = ['Name'] + ['' for _ in req.days] + ['Total']
             col_widths = [name_w + level_w] + [col_w] * len(req.days) + [14*mm]
-            sched_data = [header1, header2]
 
             row_styles = []
             r = 2
