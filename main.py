@@ -180,15 +180,25 @@ def generate_schedule(data: ScheduleRequest):
         "employees": employees,
         "levels": levels,
     }
+def get_date_for_day(week_start_str, day_index):
+    try:
+        from datetime import datetime, timedelta
+        start = datetime.strptime(week_start_str, '%Y-%m-%d')
+        return (start + timedelta(days=day_index)).strftime('%d %b')
+    except:
+        return ''
 
 @app.post("/generate-pdf")
 def generate_pdf(req: PDFRequest):
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib import colors
-    from reportlab.lib.units import mm
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+
+    @app.post("/generate-pdf")
+    def generate_pdf(req: PDFRequest):
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib import colors
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
     BG_DARK      = colors.HexColor('#0f0e0c')
     AMBER        = colors.HexColor('#e8a830')
@@ -274,13 +284,6 @@ def generate_pdf(req: PDFRequest):
     show_level = req.show_level if req.show_level is not None else True
 
     # Generate dates for each day column
-    def get_date_for_day(week_start_str, day_index):
-        try:
-            from datetime import datetime, timedelta
-            start = datetime.strptime(week_start_str, '%Y-%m-%d')
-            return (start + timedelta(days=day_index)).strftime('%d %b')
-        except:
-            return ''
 
     dates = []
     for di in range(len(req.days)):
