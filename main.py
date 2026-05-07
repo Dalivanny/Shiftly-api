@@ -273,18 +273,31 @@ def generate_pdf(req: PDFRequest):
     level_w = 24*mm
     show_level = req.show_level if req.show_level is not None else True
 
+    # Generate dates for each day column
+    def get_date_for_day(week_start_str, day_index):
+        try:
+            from datetime import datetime, timedelta
+            start = datetime.strptime(week_start_str, '%Y-%m-%d')
+            return (start + timedelta(days=day_index)).strftime('%d %b')
+        except:
+            return ''
+
+    dates = []
+    for di in range(len(req.days)):
+        dates.append(get_date_for_day(req.week_start or '', di) if req.week_start else '')
+
     if show_level:
-        header1 = ['', ''] + [d[:3] for d in req.days] + ['']
-        header2 = ['Name', 'Level'] + ['' for _ in req.days] + ['Total']
+        header1 = ['', ''] + [f"{d[:3]}" for d in req.days] + ['']
+        header2 = ['Name', 'Level'] + [dates[di] if dates[di] else '' for di in range(len(req.days))] + ['Total']
         col_widths = [name_w, level_w] + [col_w] * len(req.days) + [14*mm]
     else:
-        header1 = [''] + [d[:3] for d in req.days] + ['']
-        header2 = ['Name'] + ['' for _ in req.days] + ['Total']
+        header1 = [''] + [f"{d[:3]}" for d in req.days] + ['']
+        header2 = ['Name'] + [dates[di] if dates[di] else '' for di in range(len(req.days))] + ['Total']
         col_widths = [name_w + level_w] + [col_w] * len(req.days) + [14*mm]
+        sched_data = [header1, header2]
 
-    sched_data = [header1, header2]
-    row_styles = []
-    r = 2
+        row_styles = []
+        r = 2
 
     level_order = ['Senior', 'Junior', 'New Staff', 'Trainee']
     for level in level_order:
