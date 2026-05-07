@@ -36,6 +36,7 @@ class PDFRequest(BaseModel):
     shift_counts: Dict[str, int]
     rules: List[Dict[str, str]]
     week_start: Optional[str] = None
+    show_level: Optional[bool] = True
 
 @app.get("/")
 def root():
@@ -306,12 +307,15 @@ def generate_pdf(req: PDFRequest):
         for s in group:
             name = s.get('name', '')
             count = req.shift_counts.get(name, 0)
-            row = [name, level]
+            if req.show_level:
+                row = [name, level]
+            else:
+                row = [name]
             for day in req.days:
                 val = req.schedule.get(name, {}).get(day, 'N/A')
                 row.append(val)
-            row.append(str(count))
-            sched_data.append(row)
+                row.append(str(count))
+                sched_data.append(row)
 
             lbg, ltxt = level_color(level)
             row_bg = ROW_WHITE if r % 2 == 0 else ROW_ALT
@@ -346,7 +350,14 @@ def generate_pdf(req: PDFRequest):
                         ]
             r += 1
 
+if req.show_level:
+    header1 = ['', ''] + [d[:3] for d in req.days] + ['']
+    header2 = ['Name', 'Level'] + ['' for _ in req.days] + ['Total']
     col_widths = [name_w, level_w] + [col_w] * len(req.days) + [14*mm]
+else:
+    header1 = [''] + [d[:3] for d in req.days] + ['']
+    header2 = ['Name'] + ['' for _ in req.days] + ['Total']
+    col_widths = [name_w + level_w] + [col_w] * len(req.days) + [14*mm]    
     base_style = TableStyle([
         ('BACKGROUND', (0,0), (-1,0), BG_DARK),
         ('TEXTCOLOR', (0,0), (-1,0), AMBER),
