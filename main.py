@@ -64,26 +64,22 @@ def generate_schedule(data: ScheduleRequest):
             for s in range(num_shifts):
                 shift_assigned[(e, d, s)] = model.new_bool_var(f"shift_e{e}_d{d}_s{s}")
 
-    # RULE 1: Respect availability
     for e in range(num_employees):
         for d in range(num_days):
             for s in range(num_shifts):
                 if availability[e][d][s] == 0:
                     model.add(shift_assigned[(e, d, s)] == 0)
 
-    # RULE 2: Closed days
     for d, day in enumerate(days):
         if day in closed_days:
             for e in range(num_employees):
                 for s in range(num_shifts):
                     model.add(shift_assigned[(e, d, s)] == 0)
 
-    # RULE 3: No double shifts
     for e in range(num_employees):
         for d in range(num_days):
             model.add(sum(shift_assigned[(e, d, s)] for s in range(num_shifts)) <= 1)
 
-    # RULE 4: Min/max staff per day
     for d, day in enumerate(days):
         if day in closed_days:
             continue
@@ -98,7 +94,6 @@ def generate_schedule(data: ScheduleRequest):
         model.add(total >= min_s)
         model.add(total <= max_s)
 
-    # RULE 5: Opening staff per day
     for d, day in enumerate(days):
         if day in closed_days:
             continue
@@ -106,7 +101,6 @@ def generate_schedule(data: ScheduleRequest):
         total_open = sum(shift_assigned[(e, d, 0)] for e in range(num_employees))
         model.add(total_open == req_open)
 
-    # SPECIAL RULES: supervision
     for rule in rules:
         level1 = rule.get('level1')
         level2 = rule.get('level2')
@@ -129,7 +123,6 @@ def generate_schedule(data: ScheduleRequest):
                 )
                 model.add(supervisor_present >= 1).only_enforce_if(works_today)
 
-    # FAIRNESS
     available_this_week = [
         e for e in range(num_employees)
         if any(availability[e][d][s] == 1 for d in range(num_days) for s in range(num_shifts))
@@ -236,7 +229,6 @@ def generate_pdf(req: PDFRequest):
     )
     story = []
 
-    # Header
     week_str = req.week_start or datetime.date.today().strftime('%d %b %Y')
     header_data = [[
         Paragraph('<b>Shiftly</b>', ParagraphStyle('logo', fontName='Helvetica-Bold', fontSize=18, textColor=AMBER)),
@@ -256,7 +248,6 @@ def generate_pdf(req: PDFRequest):
     story.append(header_tbl)
     story.append(Spacer(1, 8))
 
-    # Legend
     legend_data = [[
         Paragraph('<b>Legend:</b>', ParagraphStyle('lg', fontName='Helvetica-Bold', fontSize=8, textColor=TEXT_MID)),
         Paragraph(f'{req.shift_times[0]} Opening', ParagraphStyle('lg2', fontName='Helvetica', fontSize=8, textColor=AMBER)),
@@ -274,13 +265,20 @@ def generate_pdf(req: PDFRequest):
     story.append(legend_tbl)
     story.append(Spacer(1, 4))
 
-    # Schedule table
-    col_w  = 19*mm
-    name_w = 28*mm
+    col_w   = 19*mm
+    name_w  = 28*mm
     level_w = 24*mm
+    show_level = req.show_level if req.show_level is not None else True
 
-    header1 = ['', ''] + [d[:3] for d in req.days] + ['']
-    header2 = ['Name', 'Level'] + ['' for _ in req.days] + ['Total']
+    if show_level:
+        header1 = ['', ''] + [d[:3] for d in req.days] + ['']
+        header2 = ['Name', 'Level'] + ['' for _ in req.days] + ['Total']
+        col_widths = [name_w, level_w] + [col_w] * len(req.days) + [14*mm]
+    else:
+        header1 = [''] + [d[:3] for d in req.days] + ['']
+        header2 = ['Name'] + ['' for _ in req.days] + ['Total']
+        col_widths = [name_w + level_w] + [col_w] * len(req.days) + [14*mm]
+
     sched_data = [header1, header2]
     row_styles = []
     r = 2
@@ -291,7 +289,7 @@ def generate_pdf(req: PDFRequest):
         if not group:
             continue
 
-        divider = [level.upper()] + [''] * (len(req.days) + 2)
+        divider = [level.upper()] + [''] * (len(req.days) + (2 if show_level else 1))
         sched_data.append(divider)
         row_styles += [
             ('SPAN', (0, r), (-1, r)),
@@ -307,29 +305,33 @@ def generate_pdf(req: PDFRequest):
         for s in group:
             name = s.get('name', '')
             count = req.shift_counts.get(name, 0)
-            if req.show_level:
+            if show_level:
                 row = [name, level]
             else:
                 row = [name]
             for day in req.days:
                 val = req.schedule.get(name, {}).get(day, 'N/A')
                 row.append(val)
-                row.append(str(count))
-                sched_data.append(row)
+            row.append(str(count))
+            sched_data.append(row)
 
             lbg, ltxt = level_color(level)
             row_bg = ROW_WHITE if r % 2 == 0 else ROW_ALT
             row_styles += [
                 ('BACKGROUND', (0, r), (-1, r), row_bg),
                 ('FONTNAME', (0, r), (0, r), 'Helvetica-Bold'),
-                ('BACKGROUND', (1, r), (1, r), lbg),
-                ('TEXTCOLOR', (1, r), (1, r), ltxt),
-                ('FONTNAME', (1, r), (1, r), 'Helvetica-Bold'),
-                ('FONTSIZE', (1, r), (1, r), 7.5),
             ]
+            if show_level:
+                row_styles += [
+                    ('BACKGROUND', (1, r), (1, r), lbg),
+                    ('TEXTCOLOR', (1, r), (1, r), ltxt),
+                    ('FONTNAME', (1, r), (1, r), 'Helvetica-Bold'),
+                    ('FONTSIZE', (1, r), (1, r), 7.5),
+                ]
 
+            col_offset = 2 if show_level else 1
             for di, day in enumerate(req.days):
-                col = di + 2
+                col = di + col_offset
                 val = req.schedule.get(name, {}).get(day, 'N/A')
                 if day in req.closed_days:
                     row_styles.append(('TEXTCOLOR', (col, r), (col, r), TEXT_LIGHT))
@@ -350,14 +352,6 @@ def generate_pdf(req: PDFRequest):
                         ]
             r += 1
 
-if req.show_level:
-    header1 = ['', ''] + [d[:3] for d in req.days] + ['']
-    header2 = ['Name', 'Level'] + ['' for _ in req.days] + ['Total']
-    col_widths = [name_w, level_w] + [col_w] * len(req.days) + [14*mm]
-else:
-    header1 = [''] + [d[:3] for d in req.days] + ['']
-    header2 = ['Name'] + ['' for _ in req.days] + ['Total']
-    col_widths = [name_w + level_w] + [col_w] * len(req.days) + [14*mm]    
     base_style = TableStyle([
         ('BACKGROUND', (0,0), (-1,0), BG_DARK),
         ('TEXTCOLOR', (0,0), (-1,0), AMBER),
@@ -386,23 +380,21 @@ else:
     story.append(sched_table)
     story.append(Spacer(1, 14))
 
-    # Bottom section: fairness + rules
     max_shifts = max(req.shift_counts.values()) if req.shift_counts else 1
-    fair_data = [['Employee', 'Level', 'Shifts', 'Distribution']]
+    fair_data = [['Employee', 'Shifts', 'Distribution']]
     fair_styles = []
     for i, s in enumerate(req.staff):
         name = s.get('name', '')
         level = s.get('level', '')
         count = req.shift_counts.get(name, 0)
         bar = '█' * count + '░' * (max_shifts - count)
-        fair_data.append([name, level, str(count), bar])
+        fair_data.append([name, str(count), bar])
         lbg, ltxt = level_color(level)
         ri = i + 1
         fair_styles += [
-            ('BACKGROUND', (1, ri), (1, ri), lbg),
-            ('TEXTCOLOR', (1, ri), (1, ri), ltxt),
-            ('FONTNAME', (1, ri), (1, ri), 'Helvetica-Bold'),
-            ('FONTSIZE', (1, ri), (1, ri), 7.5),
+            ('BACKGROUND', (0, ri), (0, ri), lbg),
+            ('TEXTCOLOR', (0, ri), (0, ri), ltxt),
+            ('FONTNAME', (0, ri), (0, ri), 'Helvetica-Bold'),
         ]
 
     fair_style = TableStyle([
@@ -410,7 +402,6 @@ else:
         ('TEXTCOLOR', (0,0), (-1,0), AMBER),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('FONTSIZE', (0,0), (-1,0), 8),
-        ('FONTNAME', (0,1), (0,-1), 'Helvetica-Bold'),
         ('FONTSIZE', (0,1), (-1,-1), 8.5),
         ('TEXTCOLOR', (0,1), (0,-1), TEXT_DARK),
         ('GRID', (0,0), (-1,-1), 0.3, BORDER),
@@ -421,7 +412,7 @@ else:
         ('RIGHTPADDING', (0,0), (-1,-1), 8),
     ] + fair_styles)
 
-    fair_table = Table(fair_data, colWidths=[40*mm, 32*mm, 20*mm, 55*mm], style=fair_style)
+    fair_table = Table(fair_data, colWidths=[40*mm, 20*mm, 60*mm], style=fair_style)
 
     rules_data = [['#', 'Rule']]
     for i, rule in enumerate(req.rules):
@@ -450,14 +441,13 @@ else:
     rules_table = Table(rules_data, colWidths=[12*mm, 140*mm], style=rules_style)
 
     bottom_data = [[fair_table, rules_table]]
-    bottom_tbl = Table(bottom_data, colWidths=[155*mm, 114*mm])
+    bottom_tbl = Table(bottom_data, colWidths=[130*mm, 139*mm])
     bottom_tbl.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('LEFTPADDING', (1,0), (1,0), 14),
     ]))
-    story.append(Paragraph('FAIRNESS SUMMARY', ParagraphStyle('sec', fontName='Helvetica-Bold', fontSize=9, textColor=TEXT_LIGHT, spaceBefore=4, spaceAfter=6)))
+    story.append(Paragraph('FAIRNESS & RULES', ParagraphStyle('sec', fontName='Helvetica-Bold', fontSize=9, textColor=TEXT_LIGHT, spaceBefore=4, spaceAfter=6)))
     story.append(bottom_tbl)
-
     story.append(Spacer(1, 10))
     story.append(Paragraph(
         'Generated by Shiftly · All supervision rules verified · Powered by OR-Tools',
