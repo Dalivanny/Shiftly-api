@@ -375,7 +375,7 @@ def generate_pdf(req: PDFRequest):
                 val = req.schedule.get(name, {}).get(day, 'N/A')
                 if day in req.closed_days:
                     row_styles += [
-                        ('BACKGROUND', (col, r), (col, r), colors.HexColor('#f5f5f5')),
+                        ('BACKGROUND', (col, r), (col, r), ROW_WHITE if r % 2 == 0 else ROW_ALT),
                         ('TEXTCOLOR', (col, r), (col, r), colors.HexColor('#cccccc')),
                     ]
                 elif val == 'N/A':
@@ -398,11 +398,11 @@ def generate_pdf(req: PDFRequest):
     for di, day in enumerate(req.days):
         if day in req.closed_days:
             col = di + 2
-            # Style the day header
+            # Style the day header - same dark background as other days
             row_styles += [
-                ('BACKGROUND', (col, 1), (col, 1), CLOSED_BG),
-                ('TEXTCOLOR', (col, 1), (col, 1), CLOSED_TEXT),
-            ]
+                    ('BACKGROUND', (col, 1), (col, 1), BG_DARK),
+                    ('TEXTCOLOR', (col, 1), (col, 1), AMBER),
+                ]
 
     base_style = TableStyle([
         # Date row (row 0)
