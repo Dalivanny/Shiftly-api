@@ -149,9 +149,9 @@ def generate_schedule(data: ScheduleRequest):
             if open_available < open_needed:
                 issues.append(f"{day}: only {open_available} staff available for opening shift but {open_needed} needed")
 
-    if issues:
-        return {"error": "Could not generate schedule:\n• " + "\n• ".join(issues)}
-    return {"error": "Could not generate schedule. Check that enough staff are available to meet your minimum requirements."}
+            if issues:
+                return {"error": "Could not generate schedule:\n• " + "\n• ".join(issues)}
+            return {"error": "Could not generate schedule. Check that enough staff are available to meet your minimum requirements."}
 
     result = {}
     shift_counts = {}
