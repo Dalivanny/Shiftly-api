@@ -128,7 +128,30 @@ def generate_schedule(data: ScheduleRequest):
     status = solver.solve(model)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return {"error": "No valid schedule found. Check availability and staffing rules."}
+        # Diagnose why
+        issues = []
+        for d, day in enumerate(days):
+            if day in closed_days:
+                continue
+            day_req = data.staff_requirements.get(day, {})
+            min_needed = day_req.get('min', 0)
+            available_count = sum(
+                1 for e in range(num_employees)
+                if any(availability[e][d][s] == 1 for s in range(num_shifts))
+            )
+            if available_count < min_needed:
+                issues.append(f"{day}: only {available_count} staff available but minimum is {min_needed}")
+            open_needed = data.opening_requirements.get(day, 0)
+            open_available = sum(
+                1 for e in range(num_employees)
+                if availability[e][d][0] == 1
+            )
+            if open_available < open_needed:
+                issues.append(f"{day}: only {open_available} staff available for opening shift but {open_needed} needed")
+
+    if issues:
+        return {"error": "Could not generate schedule:\n• " + "\n• ".join(issues)}
+    return {"error": "Could not generate schedule. Check that enough staff are available to meet your minimum requirements."}
 
     result = {}
     shift_counts = {}
