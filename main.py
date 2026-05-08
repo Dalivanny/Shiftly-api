@@ -143,7 +143,7 @@ def generate_schedule(data: ScheduleRequest):
                 if solver.value(shift_assigned[(e, d, s)]) == 1:
                     assigned = shifts[s]
             if day in closed_days:
-                result[name][day] = "CLOSED"
+                result[name][day] = "—"
             elif assigned:
                 result[name][day] = assigned
                 shift_counts[name] += 1
@@ -217,12 +217,26 @@ def generate_pdf(req: PDFRequest):
             return (AMBER_LIGHT, AMBER)
 
     def level_color(level):
-        return {
+        # Fixed colors for known levels
+        known = {
             'Senior':    (AMBER_LIGHT, AMBER),
             'Junior':    (TEAL_LIGHT, TEAL),
             'New Staff': (PURPLE_LIGHT, PURPLE),
             'Trainee':   (CORAL_LIGHT, CORAL),
-        }.get(level, (ROW_WHITE, TEXT_MID))
+        }
+        if level in known:
+            return known[level]
+        # For custom levels, cycle through palette based on hash of name
+        palette = [
+            (BLUE_LIGHT, BLUE),
+            (PINK_LIGHT, PINK),
+            (GREEN_LIGHT, GREEN),
+            (AMBER_LIGHT, AMBER),
+            (TEAL_LIGHT, TEAL),
+            (PURPLE_LIGHT, PURPLE),
+            (CORAL_LIGHT, CORAL),
+        ]
+        return palette[hash(level) % len(palette)]
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -311,7 +325,15 @@ def generate_pdf(req: PDFRequest):
     row_styles = []
     r = 2
 
-    level_order = ['Senior', 'Junior', 'New Staff', 'Trainee']
+    # Get all unique levels, starting with known ones then any custom ones
+    known_levels = ['Senior', 'Junior', 'New Staff', 'Trainee']
+    all_levels_in_staff = []
+    for s in req.staff:
+        lv = s.get('level', '')
+        if lv and lv not in all_levels_in_staff:
+            all_levels_in_staff.append(lv)
+    level_order = known_levels + [l for l in all_levels_in_staff if l not in known_levels]
+
     for level in level_order:
         group = [s for s in req.staff if s.get('level') == level]
         if not group:
@@ -353,8 +375,8 @@ def generate_pdf(req: PDFRequest):
                 val = req.schedule.get(name, {}).get(day, 'N/A')
                 if day in req.closed_days:
                     row_styles += [
-                        ('BACKGROUND', (col, r), (col, r), CLOSED_BG),
-                        ('TEXTCOLOR', (col, r), (col, r), CLOSED_TEXT),
+                        ('BACKGROUND', (col, r), (col, r), colors.HexColor('#f5f5f5')),
+                        ('TEXTCOLOR', (col, r), (col, r), colors.HexColor('#cccccc')),
                     ]
                 elif val == 'N/A':
                     row_styles += [
