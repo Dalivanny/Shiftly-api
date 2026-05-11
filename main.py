@@ -22,8 +22,7 @@ class ScheduleRequest(BaseModel):
     days: List[str]
     shifts: List[str]
     closed_days: List[str]
-    staff_requirements: Dict[str, Any]
-    opening_requirements: Dict[str, Any]
+    shift_staff_requirements: Dict[str, Dict[str, int]]  # { "Monday": { "16:00": 3, "17:00": 2 } }
     availability: List[List[List[int]]]
     rules: List[Dict[str, str]]
 
@@ -51,6 +50,7 @@ def generate_schedule(data: ScheduleRequest):
     closed_days = data.closed_days
     availability = data.availability
     rules = data.rules
+    shift_staff_reqs = data.shift_staff_requirements
 
     num_employees = len(employees)
     num_days = len(days)
@@ -66,39 +66,43 @@ def generate_schedule(data: ScheduleRequest):
             for s in range(num_shifts):
                 shift_assigned[(e, d, s)] = model.new_bool_var(f"shift_e{e}_d{d}_s{s}")
 
+    # RULE 1: Respect availability
     for e in range(num_employees):
         for d in range(num_days):
             for s in range(num_shifts):
                 if availability[e][d][s] == 0:
                     model.add(shift_assigned[(e, d, s)] == 0)
 
+    # RULE 2: Closed days
     for d, day in enumerate(days):
         if day in closed_days:
             for e in range(num_employees):
                 for s in range(num_shifts):
                     model.add(shift_assigned[(e, d, s)] == 0)
 
+    # RULE 3: No double shifts
     for e in range(num_employees):
         for d in range(num_days):
             model.add(sum(shift_assigned[(e, d, s)] for s in range(num_shifts)) <= 1)
 
+    # RULE 4: Exact staff per shift per day
     for d, day in enumerate(days):
         if day in closed_days:
             continue
-        day_req = data.staff_requirements.get(day, {})
-        min_s = day_req.get('min', 0)
-        max_s = day_req.get('max', num_employees)
-        total = sum(shift_assigned[(e, d, s)] for e in range(num_employees) for s in range(num_shifts))
-        model.add(total >= min_s)
-        model.add(total <= max_s)
+        day_reqs = shift_staff_reqs.get(day, {})
+        for s, shift_time in enumerate(shifts):
+            if s >= num_shifts:
+                continue
+            required = day_reqs.get(shift_time)
+            if required is not None and required > 0:
+                total = sum(shift_assigned[(e, d, s)] for e in range(num_employees))
+                model.add(total == required)
+            elif required == 0 or shift_time not in day_reqs:
+                # Shift doesn't run this day
+                for e in range(num_employees):
+                    model.add(shift_assigned[(e, d, s)] == 0)
 
-    for d, day in enumerate(days):
-        if day in closed_days:
-            continue
-        req_open = data.opening_requirements.get(day, 0)
-        total_open = sum(shift_assigned[(e, d, 0)] for e in range(num_employees))
-        model.add(total_open == req_open)
-
+    # SPECIAL RULES: supervision
     for rule in rules:
         level1 = rule.get('level1')
         level2 = rule.get('level2')
@@ -107,15 +111,31 @@ def generate_schedule(data: ScheduleRequest):
         for d in range(num_days):
             for e_n in supervised:
                 works_today = model.new_bool_var(f"works_{e_n}_d{d}")
-                model.add(sum(shift_assigned[(e_n, d, s)] for s in range(num_shifts)) >= 1).only_enforce_if(works_today)
-                model.add(sum(shift_assigned[(e_n, d, s)] for s in range(num_shifts)) == 0).only_enforce_if(works_today.negated())
-                supervisor_present = sum(shift_assigned[(e_s, d, s)] for e_s in supervisors for s in range(num_shifts))
+                model.add(
+                    sum(shift_assigned[(e_n, d, s)] for s in range(num_shifts)) >= 1
+                ).only_enforce_if(works_today)
+                model.add(
+                    sum(shift_assigned[(e_n, d, s)] for s in range(num_shifts)) == 0
+                ).only_enforce_if(works_today.negated())
+                supervisor_present = sum(
+                    shift_assigned[(e_s, d, s)]
+                    for e_s in supervisors
+                    for s in range(num_shifts)
+                )
                 model.add(supervisor_present >= 1).only_enforce_if(works_today)
 
-    available_this_week = [e for e in range(num_employees) if any(availability[e][d][s] == 1 for d in range(num_days) for s in range(num_shifts))]
+    # FAIRNESS
+    available_this_week = [
+        e for e in range(num_employees)
+        if any(availability[e][d][s] == 1 for d in range(num_days) for s in range(num_shifts))
+    ]
     total_shifts_per = []
     for e in available_this_week:
-        total = sum(shift_assigned[(e, d, s)] for d in range(num_days) for s in range(num_shifts))
+        total = sum(
+            shift_assigned[(e, d, s)]
+            for d in range(num_days)
+            for s in range(num_shifts)
+        )
         total_shifts_per.append(total)
 
     if total_shifts_per:
@@ -133,25 +153,21 @@ def generate_schedule(data: ScheduleRequest):
         for d, day in enumerate(days):
             if day in closed_days:
                 continue
-            day_req = data.staff_requirements.get(day, {})
-            min_needed = day_req.get('min', 0)
-            available_count = sum(
-                1 for e in range(num_employees)
-                if any(availability[e][d][s] == 1 for s in range(num_shifts))
-            )
-            if available_count < min_needed:
-                issues.append(f"{day}: only {available_count} staff available but minimum is {min_needed}")
-            open_needed = data.opening_requirements.get(day, 0)
-            open_available = sum(
-                1 for e in range(num_employees)
-                if availability[e][d][0] == 1
-            )
-            if open_available < open_needed:
-                issues.append(f"{day}: only {open_available} staff available for opening shift but {open_needed} needed")
-
-            if issues:
-                return {"error": "Could not generate schedule:\n• " + "\n• ".join(issues)}
-            return {"error": "Could not generate schedule. Check that enough staff are available to meet your minimum requirements."}
+            day_reqs = shift_staff_reqs.get(day, {})
+            for s, shift_time in enumerate(shifts):
+                if s >= num_shifts:
+                    continue
+                required = day_reqs.get(shift_time, 0)
+                if required > 0:
+                    available_count = sum(
+                        1 for e in range(num_employees)
+                        if availability[e][d][s] == 1
+                    )
+                    if available_count < required:
+                        issues.append(f"{day} {shift_time}: only {available_count} available but {required} needed")
+        if issues:
+            return {"error": "Could not generate schedule:\n• " + "\n• ".join(issues)}
+        return {"error": "Could not generate schedule. Check that enough staff are available to meet your requirements."}
 
     result = {}
     shift_counts = {}
@@ -174,7 +190,13 @@ def generate_schedule(data: ScheduleRequest):
                 available = any(availability[e][d][s] == 1 for s in range(num_shifts))
                 result[name][day] = "OFF" if available else "N/A"
 
-    return {"success": True, "schedule": result, "shift_counts": shift_counts, "employees": employees, "levels": levels}
+    return {
+        "success": True,
+        "schedule": result,
+        "shift_counts": shift_counts,
+        "employees": employees,
+        "levels": levels,
+    }
 
 
 def get_date_for_day(week_start_str, day_index):
@@ -218,10 +240,7 @@ def generate_pdf(req: PDFRequest):
     TEXT_LIGHT   = colors.HexColor('#9a9894')
     RED_LIGHT    = colors.HexColor('#FCEBEB')
     RED          = colors.HexColor('#A32D2D')
-    CLOSED_BG    = colors.HexColor('#f5f0f0')
-    CLOSED_TEXT  = colors.HexColor('#cc4444')
 
-    # Color palette for shift times - cycles through if more than palette size
     SHIFT_PALETTE = [
         (AMBER_LIGHT, AMBER),
         (TEAL_LIGHT, TEAL),
@@ -240,7 +259,6 @@ def generate_pdf(req: PDFRequest):
             return (AMBER_LIGHT, AMBER)
 
     def level_color(level):
-        # Fixed colors for known levels
         known = {
             'Senior':    (AMBER_LIGHT, AMBER),
             'Junior':    (TEAL_LIGHT, TEAL),
@@ -249,15 +267,9 @@ def generate_pdf(req: PDFRequest):
         }
         if level in known:
             return known[level]
-        # For custom levels, cycle through palette based on hash of name
         palette = [
-            (BLUE_LIGHT, BLUE),
-            (PINK_LIGHT, PINK),
-            (GREEN_LIGHT, GREEN),
-            (AMBER_LIGHT, AMBER),
-            (TEAL_LIGHT, TEAL),
-            (PURPLE_LIGHT, PURPLE),
-            (CORAL_LIGHT, CORAL),
+            (BLUE_LIGHT, BLUE), (PINK_LIGHT, PINK), (GREEN_LIGHT, GREEN),
+            (AMBER_LIGHT, AMBER), (TEAL_LIGHT, TEAL), (PURPLE_LIGHT, PURPLE), (CORAL_LIGHT, CORAL),
         ]
         return palette[hash(level) % len(palette)]
 
@@ -271,7 +283,6 @@ def generate_pdf(req: PDFRequest):
 
     show_level_divider = req.show_level_divider if req.show_level_divider is not None else True
 
-    # Header
     week_str = req.week_start or datetime.date.today().strftime('%d %b %Y')
     if req.week_start:
         try:
@@ -298,7 +309,6 @@ def generate_pdf(req: PDFRequest):
     story.append(header_tbl)
     story.append(Spacer(1, 8))
 
-    # Legend - dynamic based on shift times
     legend_items = [Paragraph('<b>Legend:</b>', ParagraphStyle('lg', fontName='Helvetica-Bold', fontSize=8, textColor=TEXT_MID))]
     legend_widths = [18*mm]
     for i, st in enumerate(req.shift_times):
@@ -309,10 +319,9 @@ def generate_pdf(req: PDFRequest):
     legend_widths.append(55*mm)
     legend_items.append(Paragraph('N/A = not available', ParagraphStyle('lgna', fontName='Helvetica', fontSize=8, textColor=RED)))
     legend_widths.append(35*mm)
-    legend_items.append(Paragraph('CLOSED = closed day', ParagraphStyle('lgcl', fontName='Helvetica', fontSize=8, textColor=CLOSED_TEXT)))
-    legend_widths.append(35*mm)
+    legend_items.append(Paragraph('— = closed', ParagraphStyle('lgcl', fontName='Helvetica', fontSize=8, textColor=TEXT_LIGHT)))
+    legend_widths.append(25*mm)
 
-    # Fill remaining width
     total_used = sum(legend_widths)
     page_w = landscape(A4)[0] - 28*mm
     if total_used < page_w:
@@ -328,12 +337,10 @@ def generate_pdf(req: PDFRequest):
     story.append(legend_tbl)
     story.append(Spacer(1, 4))
 
-    # Schedule table
     col_w  = 19*mm
-    name_w = 52*mm  # wider since no level column
+    name_w = 52*mm
 
-    # Build date row and day row separately
-    dates_row = ['', '']  # name + spacer
+    dates_row = ['', '']
     days_row  = ['Name', '']
     for di, day in enumerate(req.days):
         date_str = get_date_for_day(req.week_start, di) if req.week_start else ''
@@ -348,7 +355,6 @@ def generate_pdf(req: PDFRequest):
     row_styles = []
     r = 2
 
-    # Get all unique levels, starting with known ones then any custom ones
     known_levels = ['Senior', 'Junior', 'New Staff', 'Trainee']
     all_levels_in_staff = []
     for s in req.staff:
@@ -396,7 +402,7 @@ def generate_pdf(req: PDFRequest):
             for di, day in enumerate(req.days):
                 col = di + 2
                 val = req.schedule.get(name, {}).get(day, 'N/A')
-                if day in req.closed_days:
+                if val == '—' or day in req.closed_days:
                     row_styles += [
                         ('BACKGROUND', (col, r), (col, r), ROW_WHITE if r % 2 == 0 else ROW_ALT),
                         ('TEXTCOLOR', (col, r), (col, r), colors.HexColor('#cccccc')),
@@ -417,18 +423,15 @@ def generate_pdf(req: PDFRequest):
                     ]
             r += 1
 
-    # Now handle closed day columns - merge all cells in closed day columns
     for di, day in enumerate(req.days):
         if day in req.closed_days:
             col = di + 2
-            # Style the day header - same dark background as other days
             row_styles += [
-                    ('BACKGROUND', (col, 1), (col, 1), BG_DARK),
-                    ('TEXTCOLOR', (col, 1), (col, 1), AMBER),
-                ]
+                ('BACKGROUND', (col, 1), (col, 1), BG_DARK),
+                ('TEXTCOLOR', (col, 1), (col, 1), AMBER),
+            ]
 
     base_style = TableStyle([
-        # Date row (row 0)
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e1c19')),
         ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#888480')),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica'),
@@ -436,7 +439,6 @@ def generate_pdf(req: PDFRequest):
         ('ALIGN', (0,0), (-1,0), 'CENTER'),
         ('TOPPADDING', (0,0), (-1,0), 4),
         ('BOTTOMPADDING', (0,0), (-1,0), 4),
-        # Day name row (row 1)
         ('BACKGROUND', (0,1), (-1,1), BG_DARK),
         ('TEXTCOLOR', (0,1), (-1,1), AMBER),
         ('FONTNAME', (0,1), (-1,1), 'Helvetica-Bold'),
@@ -444,10 +446,8 @@ def generate_pdf(req: PDFRequest):
         ('ALIGN', (0,1), (-1,1), 'CENTER'),
         ('TOPPADDING', (0,1), (-1,1), 6),
         ('BOTTOMPADDING', (0,1), (-1,1), 6),
-        # Name col
-        ('ALIGN', (0,2), (0,-1), 'LEFT'),
         ('TEXTCOLOR', (0,1), (0,1), colors.HexColor('#c8c4bc')),
-        # Day cols center
+        ('ALIGN', (0,2), (0,-1), 'LEFT'),
         ('ALIGN', (2,0), (-1,-1), 'CENTER'),
         ('FONTNAME', (0,2), (-1,-1), 'Helvetica'),
         ('FONTSIZE', (0,2), (-1,-1), 8.5),
@@ -458,15 +458,13 @@ def generate_pdf(req: PDFRequest):
         ('LEFTPADDING', (0,0), (-1,-1), 6),
         ('RIGHTPADDING', (0,0), (-1,-1), 6),
         ('GRID', (0,0), (-1,-1), 0.3, BORDER),
-        # Hide the empty second column
-        ('COLBACKGROUND', (1,0), (1,-1), colors.white),
+        ('LINEBELOW', (0,1), (-1,1), 0.5, colors.HexColor('#555')),
     ] + row_styles)
 
     sched_table = Table(sched_data, colWidths=col_widths, style=base_style, repeatRows=2)
     story.append(sched_table)
     story.append(Spacer(1, 14))
 
-    # Fairness table
     max_shifts = max(req.shift_counts.values()) if req.shift_counts else 1
     fair_data = [['Employee', 'Shifts', 'Distribution']]
     fair_styles = []
@@ -500,7 +498,6 @@ def generate_pdf(req: PDFRequest):
     ] + fair_styles)
     fair_table = Table(fair_data, colWidths=[40*mm, 20*mm, 60*mm], style=fair_style)
 
-    # Rules table
     rules_data = [['#', 'Rule']]
     for i, rule in enumerate(req.rules):
         rules_data.append([str(i+1), f"When a {rule.get('level2','')} is scheduled, at least one {rule.get('level1','')} must also work that day."])
