@@ -55,8 +55,9 @@ def generate_schedule(data: ScheduleRequest):
     num_employees = len(employees)
     num_days = len(days)
     num_shifts = len(shifts) if shifts else 2
-    if availability and availability[0] and availability[0][0]:
-        num_shifts = len(availability[0][0])
+    # Use actual availability dimensions to avoid index errors
+    if availability and len(availability) > 0 and len(availability[0]) > 0 and len(availability[0][0]) > 0:
+        num_shifts = min(len(shifts), len(availability[0][0]))
 
     model = cp_model.CpModel()
 
