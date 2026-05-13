@@ -409,7 +409,6 @@ def generate_pdf(req: PDFRequest):
                     ]
                 elif val == 'N/A':
                     row_styles += [
-                        ('BACKGROUND', (col, r), (col, r), RED_LIGHT),
                         ('TEXTCOLOR', (col, r), (col, r), RED),
                     ]
                 elif val == 'OFF':
