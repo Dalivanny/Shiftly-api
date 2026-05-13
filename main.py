@@ -71,7 +71,8 @@ def generate_schedule(data: ScheduleRequest):
     for e in range(num_employees):
         for d in range(num_days):
             for s in range(num_shifts):
-                if availability[e][d][s] == 0:
+                avail_val = availability[e][d][s] if s < len(availability[e][d]) else 0
+                if avail_val == 0:
                     model.add(shift_assigned[(e, d, s)] == 0)
 
     # RULE 2: Closed days
@@ -162,7 +163,7 @@ def generate_schedule(data: ScheduleRequest):
                 if required > 0:
                     available_count = sum(
                         1 for e in range(num_employees)
-                        if availability[e][d][s] == 1
+                        if s < len(availability[e][d]) and availability[e][d][s] == 1
                     )
                     if available_count < required:
                         issues.append(f"{day} {shift_time}: only {available_count} available but {required} needed")
@@ -188,7 +189,10 @@ def generate_schedule(data: ScheduleRequest):
                 result[name][day] = assigned
                 shift_counts[name] += 1
             else:
-                available = any(availability[e][d][s] == 1 for s in range(num_shifts))
+                available = any(
+                    s < len(availability[e][d]) and availability[e][d][s] == 1
+                        for s in range(num_shifts)
+                    )
                 result[name][day] = "OFF" if available else "N/A"
 
     return {
