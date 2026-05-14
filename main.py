@@ -129,8 +129,12 @@ def generate_schedule(data: ScheduleRequest):
     # FAIRNESS
     available_this_week = [
         e for e in range(num_employees)
-        if any(availability[e][d][s] == 1 for d in range(num_days) for s in range(num_shifts))
-    ]
+        if any(
+            s < len(availability[e][d]) and availability[e][d][s] == 1
+            for d in range(num_days)
+            for s in range(num_shifts)
+        )
+]
     total_shifts_per = []
     for e in available_this_week:
         total = sum(
