@@ -488,20 +488,20 @@ def _generate_pdf_inner(req: PDFRequest):
         'p2sub', fontName='Helvetica', fontSize=9, textColor=TEXT_MID, spaceAfter=12)))
 
     # Fairness table — accurate distribution
-    # Calculate max possible shifts for scale
     max_shifts = max(req.shift_counts.values()) if req.shift_counts else 1
-    bar_max = 7  # max bar width (7 days)
+    # Count actual working days (non-closed days)
+    working_days = len([d for d in req.days if d not in req.closed_days])
+    bar_max = working_days  # scale to actual working days not always 7
 
-    fair_data = [['Employee', 'Level', 'Shifts', 'Distribution (out of 7 days)']]
+    fair_data = [['Employee', 'Level', 'Shifts', f'Distribution (out of {working_days} days)']]
     fair_styles = []
     for i, s in enumerate(req.staff):
         name = s.get('name', '')
         level = s.get('level', '')
         count = req.shift_counts.get(name, 0)
-        # Accurate bar: each block = 1 shift, scaled to 7 max
         filled = count
-        empty = bar_max - count
-        bar = '█' * filled + '░' * max(empty, 0)
+        empty = max(bar_max - count, 0)
+        bar = '█' * filled + '░' * empty
         fair_data.append([name, level, str(count), bar])
         lbg, ltxt = level_color(level)
         ri = i + 1
