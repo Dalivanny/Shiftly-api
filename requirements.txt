@@ -3,3 +3,4 @@ uvicorn
 ortools
 pydantic
 reportlab
+httpx

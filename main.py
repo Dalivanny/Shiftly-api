@@ -6,6 +6,8 @@ from typing import List, Dict, Any, Optional
 from ortools.sat.python import cp_model
 import io
 import datetime
+import httpx
+import os
 
 app = FastAPI()
 
@@ -41,6 +43,58 @@ class PDFRequest(BaseModel):
 def root():
     return {"status": "Shiftly API running"}
 
+@app.post("/notify-manager")
+async def notify_manager(data: dict):
+    import os
+    manager_email = data.get('manager_email')
+    team = data.get('team')
+    week_start = data.get('week_start')
+    staff_names = data.get('staff_names', [])
+    resend_api_key = os.environ.get('RESEND_API_KEY')  # from Railway env
+
+    if not manager_email or not resend_api_key:
+        return {"error": "Missing email or API key"}
+
+    html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto;">
+        <h2 style="color: #e8a830; font-family: Georgia, serif;">shiftly</h2>
+        <p>Hi,</p>
+        <p>All staff from <strong>{team}</strong> have submitted their availability for the week of <strong>{week_start}</strong>.</p>
+        <p>Staff who submitted:</p>
+        <ul>
+            {"".join(f"<li>{name}</li>" for name in staff_names)}
+        </ul>
+        <p>You can now generate the schedule.</p>
+        <a href="https://viashiftly.com/dashboard" 
+           style="background-color: #e8a830; color: #0f0e0c; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; margin-top: 16px;">
+            Go to dashboard →
+        </a>
+        <p style="color: #999; font-size: 12px; margin-top: 24px;">© Shiftly · viashiftly.com</p>
+    </div>
+    """
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {resend_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "from": "Shiftly <hello@viashiftly.com>",
+                    "to": [manager_email],
+                    "subject": f"✓ All staff submitted — {team} week of {week_start}",
+                    "html": html
+                }
+            )
+            if response.status_code == 200:
+                return {"success": True}
+            else:
+                return {"error": response.text}
+    except Exception as e:
+        return {"error": str(e)}
+    
 @app.post("/generate")
 def generate_schedule(data: ScheduleRequest):
     employees = data.employees
