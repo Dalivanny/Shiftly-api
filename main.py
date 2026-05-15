@@ -207,9 +207,18 @@ def get_date_for_day(week_start_str, day_index):
     except:
         return ''
 
-
 @app.post("/generate-pdf")
 def generate_pdf(req: PDFRequest):
+    try:
+        return _generate_pdf_inner(req)
+    except Exception as e:
+        import traceback
+        print("PDF ERROR:", traceback.format_exc())
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+def _generate_pdf_inner(req: PDFRequest):
+    
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
     from reportlab.lib.units import mm
