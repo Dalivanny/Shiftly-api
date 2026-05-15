@@ -56,13 +56,28 @@ async def notify_manager(data: dict):
         return {"error": "Missing email or API key"}
 
     html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; color: #333;">
-        <p>Hi,</p>
-        <p>Your team <strong>{team}</strong> has all submitted their availability for the week of <strong>{week_start}</strong>.</p>
-        <p>Staff who submitted: {', '.join(staff_names)}</p>
-        <p>Head to your dashboard to generate the schedule.</p>
-        <p><a href="https://viashiftly.com/dashboard">viashiftly.com/dashboard →</a></p>
-        <p>— Shiftly</p>
+    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; background: #ffffff;">
+        
+        <div style="background: #0f0e0c; padding: 20px 24px; border-radius: 8px 8px 0 0;">
+            <span style="font-family: Georgia, serif; font-size: 20px;">
+                <span style="color: #e8a830;">shift</span><span style="color: #ffffff;">ly</span>
+            </span>
+        </div>
+
+        <div style="padding: 24px; border: 1px solid #e5e5e5; border-top: none; border-radius: 0 0 8px 8px;">
+            <p style="margin: 0 0 16px; color: #333; font-size: 15px;">Hi,</p>
+            <p style="margin: 0 0 16px; color: #333; font-size: 15px;">
+                All staff from <strong>{team}</strong> have submitted their availability for the week of <strong>{week_start}</strong>.
+            </p>
+            <p style="margin: 0 0 8px; color: #666; font-size: 13px;">Staff who submitted:</p>
+            <p style="margin: 0 0 20px; color: #333; font-size: 14px;">{', '.join(staff_names)}</p>
+            <a href="https://viashiftly.com/dashboard" 
+            style="background: #e8a830; color: #0f0e0c; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px; display: inline-block;">
+                Generate schedule →
+            </a>
+            <p style="margin: 24px 0 0; color: #999; font-size: 12px;">— Shiftly · viashiftly.com</p>
+        </div>
+
     </div>
     """
 
