@@ -56,20 +56,13 @@ async def notify_manager(data: dict):
         return {"error": "Missing email or API key"}
 
     html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto;">
-        <h2 style="color: #e8a830; font-family: Georgia, serif;">shiftly</h2>
+    <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; color: #333;">
         <p>Hi,</p>
-        <p>All staff from <strong>{team}</strong> have submitted their availability for the week of <strong>{week_start}</strong>.</p>
-        <p>Staff who submitted:</p>
-        <ul>
-            {"".join(f"<li>{name}</li>" for name in staff_names)}
-        </ul>
-        <p>You can now generate the schedule.</p>
-        <a href="https://viashiftly.com/dashboard" 
-           style="background-color: #e8a830; color: #0f0e0c; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; margin-top: 16px;">
-            Go to dashboard →
-        </a>
-        <p style="color: #999; font-size: 12px; margin-top: 24px;">© Shiftly · viashiftly.com</p>
+        <p>Your team <strong>{team}</strong> has all submitted their availability for the week of <strong>{week_start}</strong>.</p>
+        <p>Staff who submitted: {', '.join(staff_names)}</p>
+        <p>Head to your dashboard to generate the schedule.</p>
+        <p><a href="https://viashiftly.com/dashboard">viashiftly.com/dashboard →</a></p>
+        <p>— Shiftly</p>
     </div>
     """
 
