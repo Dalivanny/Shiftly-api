@@ -288,8 +288,15 @@ def generate_schedule(data: ScheduleRequest):
                         issues.append(f"{day} {role_name}: only {capable} staff can do this role but {required} needed")
         if issues:
             return {"error": "Could not generate schedule:\n• " + "\n• ".join(issues)}
-        return {"error": "Could not generate schedule. Check that enough staff are available to meet your requirements."}
-
+        hints = []
+        for role_name, day_counts in role_reqs.items():
+            capable = sum(1 for e in range(num_employees) if role_name in (employee_roles[e] if e < len(employee_roles) else []))
+            for day, required in day_counts.items():
+                if required > 0 and capable < required:
+                        hints.append(f"{day} needs {required} {role_name} but only {capable} staff can do that role")
+        if hints:
+            return {"error": "Could not generate schedule:\n• " + "\n• ".join(hints)}
+        return {"error": "Could not generate schedule. Try reducing staff requirements or checking that enough staff are available and have roles assigned."}
     result = {}
     shift_counts = {}
     role_assignments = {}  # { employee_name: { day: role_name } }
