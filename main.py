@@ -451,6 +451,12 @@ def _generate_pdf_inner(req: PDFRequest):
         bg, fg = SHIFT_PALETTE[i % len(SHIFT_PALETTE)]
         legend_items.append(Paragraph(f'{st}', ParagraphStyle(f'lg{i}', fontName='Helvetica-Bold', fontSize=8, textColor=fg)))
         legend_widths.append(22*mm)
+    # Role abbreviations in legend
+    if all_roles:
+        for r in all_roles:
+            abbrev = get_abbrev(r, all_roles)
+            legend_items.append(Paragraph(f'{abbrev} = {r}', ParagraphStyle(f'lgrole_{r}', fontName='Helvetica', fontSize=8, textColor=TEXT_MID)))
+            legend_widths.append(25*mm)
     legend_items.append(Paragraph('OFF = not scheduled', ParagraphStyle('lgoff', fontName='Helvetica', fontSize=8, textColor=TEXT_LIGHT)))
     legend_widths.append(40*mm)
     legend_items.append(Paragraph('N/A = not available', ParagraphStyle('lgna', fontName='Helvetica', fontSize=8, textColor=RED)))
@@ -458,11 +464,6 @@ def _generate_pdf_inner(req: PDFRequest):
     legend_items.append(Paragraph('— = closed', ParagraphStyle('lgcl', fontName='Helvetica', fontSize=8, textColor=TEXT_LIGHT)))
     legend_widths.append(22*mm)
 
-    # Role abbreviations in legend
-    if all_roles:
-        role_abbrevs = [f"{get_abbrev(r, all_roles)}={r}" for r in all_roles]
-        legend_items.append(Paragraph('  |  ' + '  '.join(role_abbrevs), ParagraphStyle('lgroles', fontName='Helvetica', fontSize=8, textColor=TEXT_MID)))
-        legend_widths.append(60*mm)
 
     page_w = landscape(A4)[0] - 28*mm
     total_used = sum(legend_widths)
