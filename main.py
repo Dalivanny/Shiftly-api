@@ -151,9 +151,9 @@ def generate_schedule(data: ScheduleRequest):
     if num_roles > 0:
         for e in range(num_employees):
             for d in range(num_days):
-                for r in range(num_roles):
-                    role_assigned[(e, d, r)] = model.new_bool_var(f"role_e{e}_d{d}_r{r}")
-
+                for s in range(num_shifts):
+                    for r in range(num_roles):
+                        role_assigned[(e, d, s, r)] = model.new_bool_var(f"role_e{e}_d{d}_s{s}_r{r}")
     # RULE: Respect availability
     for e in range(num_employees):
         for d in range(num_days):
@@ -197,14 +197,15 @@ def generate_schedule(data: ScheduleRequest):
                 else:
                     for e in range(num_employees):
                         model.add(shift_assigned[(e, d, s)] == 0)
+                # Role constraints: exactly N of each role must be assigned for this shift
                 for role_name, required_count in day_shift_roles.items():
                     if role_name not in role_index:
                         continue
                     ri = role_index[role_name]
                     role_total = sum(
-                        role_assigned[(e, d, ri)]
+                        role_assigned[(e, d, s, ri)]
                         for e in range(num_employees)
-                        if (e, d, ri) in role_assigned
+                        if (e, d, s, ri) in role_assigned
                     )
                     model.add(role_total == required_count)
         else:
@@ -225,21 +226,29 @@ def generate_schedule(data: ScheduleRequest):
         for e in range(num_employees):
             for d in range(num_days):
                 day_name = days[d]
-                works_today = sum(shift_assigned[(e, d, s)] for s in range(num_shifts))
                 emp_roles = employee_roles[e] if e < len(employee_roles) else []
                 emp_role_indices = [role_index[r] for r in emp_roles if r in role_index]
                 has_role_reqs = bool(shift_role_reqs and day_name in shift_role_reqs)
 
-                for r in range(num_roles):
-                    if r not in emp_role_indices:
-                        model.add(role_assigned[(e, d, r)] == 0)
-
-                if emp_role_indices and has_role_reqs:
-                    total_roles = sum(role_assigned[(e, d, r)] for r in range(num_roles))
-                    model.add(total_roles == works_today)
-                else:
+                for s in range(num_shifts):
+                    # Block roles employee can't do
                     for r in range(num_roles):
-                        model.add(role_assigned[(e, d, r)] == 0)
+                        if r not in emp_role_indices:
+                            if (e, d, s, r) in role_assigned:
+                                model.add(role_assigned[(e, d, s, r)] == 0)
+
+                    if emp_role_indices and has_role_reqs:
+                        # If working this shift → exactly one role assigned for this shift
+                        total_roles = sum(
+                            role_assigned[(e, d, s, r)]
+                            for r in range(num_roles)
+                            if (e, d, s, r) in role_assigned
+                        )
+                        model.add(total_roles == shift_assigned[(e, d, s)])
+                    else:
+                        for r in range(num_roles):
+                            if (e, d, s, r) in role_assigned:
+                                model.add(role_assigned[(e, d, s, r)] == 0)
 
     # RULE: Supervision
     for rule in rules:
@@ -328,12 +337,15 @@ def generate_schedule(data: ScheduleRequest):
                 if solver.value(shift_assigned[(e, d, s)]) == 1:
                     assigned_shift = shifts[s]
 
-            # Get role assignment
+            # Get role assignment — now per shift
             assigned_role = None
             if num_roles > 0 and assigned_shift:
-                for r in range(num_roles):
-                    if solver.value(role_assigned[(e, d, r)]) == 1:
-                        assigned_role = all_roles[r]
+                for s in range(num_shifts):
+                    if solver.value(shift_assigned[(e, d, s)]) == 1:
+                        for r in range(num_roles):
+                            if (e, d, s, r) in role_assigned and solver.value(role_assigned[(e, d, s, r)]) == 1:
+                                assigned_role = all_roles[r]
+                                break
                         break
 
             if day in closed_days:
