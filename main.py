@@ -183,13 +183,14 @@ def generate_schedule(data: ScheduleRequest):
         
         if shift_role_reqs and day in shift_role_reqs:
             # New system: role-based requirements per shift
+            # shift_staff_requirements is completely ignored for this day
             for s, shift_time in enumerate(shifts):
                 if s >= num_shifts:
                     continue
                 day_shift_roles = shift_role_reqs[day].get(shift_time, {})
                 
                 if not day_shift_roles:
-                    # No requirement for this shift — don't run it
+                    # This shift has no role requirements — block it entirely
                     for e in range(num_employees):
                         model.add(shift_assigned[(e, d, s)] == 0)
                     continue
@@ -204,17 +205,17 @@ def generate_schedule(data: ScheduleRequest):
                         model.add(shift_assigned[(e, d, s)] == 0)
                 
                 # Role constraints: exactly N of each role must be assigned
-                for role_name, required_count in day_shift_roles.items():
-                    if role_name not in role_index or required_count <= 0:
-                        continue
-                    ri = role_index[role_name]
-                    # Only count staff working this specific shift
-                    role_total = sum(
-                        role_assigned[(e, d, ri)]
-                        for e in range(num_employees)
-                        if (e, d, ri) in role_assigned
-                    )
-                    model.add(role_total == required_count)
+                    for role_name, required_count in day_shift_roles.items():
+                        if role_name not in role_index:
+                            continue
+                        ri = role_index[role_name]
+                        role_total = sum(
+                            role_assigned[(e, d, ri)]
+                            for e in range(num_employees)
+                            if (e, d, ri) in role_assigned
+                        )
+                        # Enforce exact count — including 0 (blocks this role for this shift)
+                        model.add(role_total == required_count)
         else:
             # Old system: simple staff count per shift (backwards compatible)
             day_reqs = shift_staff_reqs.get(day, {})
