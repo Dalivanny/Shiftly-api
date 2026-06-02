@@ -275,8 +275,9 @@ def generate_schedule(data: ScheduleRequest):
         total_shifts_per.append(total)
 
     if total_shifts_per:
-        # Soft fairness — maximize total shifts worked rather than strict min
-        model.maximize(sum(total_shifts_per))
+        min_shifts = model.new_int_var(0, 7, "min_shifts")
+        model.add_min_equality(min_shifts, total_shifts_per)
+        model.maximize(min_shifts)
 
 
     solver = cp_model.CpSolver()
